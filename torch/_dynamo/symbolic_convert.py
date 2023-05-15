@@ -1830,6 +1830,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 return key
         return None
 
+    @contextlib.contextmanager
+    def strict_translation_mode(self):
+        self.strict_checks_enabled = True
+        try:
+            yield
+        finally:
+            self.strict_checks_enabled = False
+
     def __init__(
         self,
         output: OutputGraph,
@@ -1885,6 +1893,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         self.checkpoint = None
         self.random_calls = []
+
+        self.strict_checks_enabled = False
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
@@ -2127,12 +2137,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        if skipfiles.check(
-            func.get_filename()
-        ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
-            unimplemented(
-                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
-            )
+        if "variables/misc.py" not in func.get_filename():
+            if skipfiles.check(
+                func.get_filename()
+            ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
+                unimplemented(
+                    f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
+                )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
@@ -2188,8 +2199,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
+        strict_ctx = contextlib.nullcontext()
+        if parent.strict_checks_enabled:
+            strict_ctx = tracer.strict_translation_mode()
         try:
-            tracer.run()
+            with strict_ctx:
+                tracer.run()
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)

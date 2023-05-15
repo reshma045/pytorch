@@ -1048,6 +1048,9 @@ class SubgraphTracer(fx.Tracer):
                     continue
                 if arg.node.name in self.input_name_to_proxy:
                     continue
+                if "whitelisted" in arg.node.meta:
+                    continue
+
                 self.lift_tracked_freevar_to_input(arg)
 
         rv = super().create_proxy(
